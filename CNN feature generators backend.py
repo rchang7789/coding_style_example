@@ -3,9 +3,150 @@ import numpy as np
 from tqdm import tqdm
 from sklearn.preprocessing import MinMaxScaler
 import random
-#from  Custom_weighted_correlation_entropy import trend, custom_weight_val
+from collections import Counter
 
 
+#--------------------------------------------------------------------------------------------------
+def stratified_random_resampling(combined_labels, y_label, sampling_method, seed_val):
+    """
+    Performs simple random sampling on each of the over-represented y-labels separately
+    
+    Parameters
+    ----------
+    1. combined_labels: 
+        Combined list of all x labels only
+    Ex. combined_labels = [image_1, image_2, type_label_output]
+    x labels take numpy array (various dimensions are accepted) in case of stacked images or series in case of vectors
+    
+    2. y_labels: 
+        Takes 1D numpy array. This label must be a single list of vector containing all the labels from 0 to n. Cannot take one hot-encoding labels
+    
+    3. sampling_method:
+        Specify whether resampling method uses "oversampling" or "undersampling" 
+        
+        Undersampling method always uses sampling method *without* replacement for each of the respective label
+        Oversampling method uses sampling method *without* replacement by default unless the required oversampling units are greater than the units in the label
+        If that is the case, sampling method *with* replacement is used for that label
+        
+    4. seed_val:
+        Takes int that corresponds to random.sample() / random.choice() functions
+    
+    Returns
+    -------
+    1. returns combined_list with orders based on the input order of the combined_labels
+    ***Must takes the lists out and reconvert to numpy array***
+    
+    2. returns list_output containins all the data that was removed as well as its original index value
+    """
+    
+    #Applies random sampling
+    random.seed(seed_val)
+
+    
+    #Merges y_label into a single list to perform undersampling altogether
+    
+    combined_labels = combined_labels + [y_label]
+    
+    #Determine the number of y_labels
+    label_val = np.unique(y_label).tolist()
+
+    #Count the number of data in each label
+    label_count = list()
+    for i in range(len(label_val)):
+        label_count.append((y_label == i).sum()) #numpy way of performing .count() function in list format
+        
+    #Determine which label has the least count
+    #******************************
+    if sampling_method == 'undersampling':
+        min_max_label = label_count.index(min(label_count))
+    elif sampling_method == 'oversampling':
+        min_max_label = label_count.index(max(label_count))
+        
+    
+    #Reorganize the list without the min label count
+    label_val.remove(min_max_label)
+    #label_val[min_label] = None
+    
+    #Create lists of lists containing label's original index value and its respective labels
+    """
+    Ex. Suppose we have a y_label = [0,0,1,2,2] that contains 3 different labels
+    y_label would then be converted into [[0,0], [1,0], [2,1], [3,2], [4,2]] 
+    where the first index within the list is the original index value and the second index
+    is the y label. This is done to track random.sample() function on which label is randomly selected
+    """
+    y_label_index = list()
+    for i in range(len(y_label)):
+        y_label_index.append([i, y_label[i]])
+    
+    #Now separating each of the label into its own lists
+    list_output = list() #This specific lists output all the labels that need to be removed with its index value
+    for i in range(len(label_val)):
+        current_label_list = list()
+        current_label = label_val[i]
+        for j in range(len(y_label_index)):
+            if y_label_index[j][1] == current_label:
+                current_label_list.append(y_label_index[j])
+                
+
+        #Specifies how many of the said label needs to be removed based off the min/max label count
+        if sampling_method == 'undersampling':
+            target_label_count = label_count[current_label] - label_count[min_max_label]
+            
+            #Random sampling within a label without replacement
+            randomized_list = random.sample(current_label_list, target_label_count) 
+  
+        elif sampling_method == 'oversampling':
+            target_label_count = label_count[min_max_label] - label_count[current_label]
+            
+            #Random sampling within a label WITH replacement if with replacement option cannot be done
+            try: 
+                randomized_list = random.sample(current_label_list, target_label_count) 
+            except ValueError:
+                print('Selected sample is larger than the population, sampling WITH replacement is used for label: ' + str(current_label_list[0][1]))
+                randomized_list = random.choices(current_label_list, k=target_label_count)
+                       
+        list_output.append(randomized_list)
+
+
+    #---Take the combined_labels and remove each of them based on its index values---
+    #Combine entire lists into a single list. If it is a binary label, then processed_list = list_output
+    processed_list = list()
+    for i in range(len(label_val)):
+        processed_list.extend(list_output[i])
+    
+    #The lists must be sorted in reverse order so that when xlabels are removed, it is not affecting its index value
+    processed_list.sort(reverse = True)
+    
+    #Deleting all the available xlabels and ylabels
+    final_output = list()
+    for i in range(len(combined_labels)):
+        target_label = combined_labels[i]
+        target_label = target_label.tolist()
+        
+        if sampling_method == 'undersampling':
+            for j in tqdm(range(len(processed_list))):
+                del target_label[processed_list[j][0]]
+            final_output.append(target_label)
+            
+        elif sampling_method == 'oversampling':
+            for j in tqdm(range(len(processed_list))):
+                #Insert(index position, insert value)
+                target_label.insert(processed_list[j][0], target_label[processed_list[j][0]])
+            final_output.append(target_label)
+
+    #Ouput Summary
+    print('\n\n* Resampling complete * | Method used: ' + str(sampling_method))
+    print('Original dataset count: ' + str(Counter(y_label)))
+    
+    #final_output's last index is always the y_label
+    y_train_rs = np.array(final_output[len(final_output)-1])
+    print('Resampled dataset count: ' + str(Counter(y_train_rs)))
+    
+    return final_output, list_output
+    
+
+
+    
 data_slice_range = 20  #aka from C20
 def x_label_image_horizontal_dim(df_raw_pd, corr_type, *pearson_output):
     image_horizontal_dim = 10  #10 # w 30 min time frame
@@ -182,40 +323,6 @@ def y_label_fixed_interval_classic(df_raw_image_np):
         
     y_cnn_label = np.array(y_cnn_label)
 
-    return y_cnn_label
-
-
-#-------------------------------------------------------------------------------
-
-
-def y_label_variable_interval_fixed_earning(df_raw_image_np):
-    y_look_forward_val = 50
-    image_vertical_dim = 10
-    
-    #Note: contains a lot of unused lists below
-    rolling_earning_output   = []
-    rolling_steps_taken = []
-    rolling_earning_output_detailed = []
-    
-    for i in tqdm(range(image_vertical_dim-1, len(df_raw_image_np)-y_look_forward_val-1)):
-        #**************************y label creation****************************
-        start_price = df_raw_image_np[i, 0]
-        rolling_earning_inner = []
-    
-        i_forward = i 
-        while True:
-            diff = df_raw_image_np[i_forward+1, 0] - start_price #+1 = next hour, adjustable
-            rolling_earning_inner.append(diff)
-            cum_earning = sum(rolling_earning_inner)
-            i_forward += 1
-            
-            if ((cum_earning <= -200) or (cum_earning >= 200) or (i_forward - i == 150)) and (i_forward - i > 0): #in US$
-                rolling_earning_output.append(cum_earning) 
-                rolling_earning_output_detailed.append(rolling_earning_inner)
-                rolling_steps_taken.append(i_forward - i)
-                break
-    
-    y_cnn_label = np.array([1 if i < 0 else 0 for i in rolling_earning_output])
     return y_cnn_label
 
 
@@ -426,205 +533,3 @@ def train_valid_test_split(x_label, y_label_pred):
 
 #x_train, y_train, x_validation, y_validation, x_test, y_test = train_valid_test_split(x_cnn_label_tf, y_cnn_label)
 
-
-
-
-
-def simple_random_undersampling(x_train, y_train, seed_val):
-    #Check if input is numpy array and converts to list
-    numpy_array_check = type(x_train).__module__ == np.__name__
-        
-    if numpy_array_check == True:
-        y_train = y_train.tolist()
-        x_train = x_train.tolist()
-        
-    #Check which y val is the majority
-    over_val = 0
-    if (y_train.count(0)/len(y_train)) > 0.5:
-        over_val = 1
-
-    print('Original 0 and 1 %: ' + str(round(y_train.count(0)/len(y_train),4)))
-    
-    #==========================================================================
-    #Simple random undersampling
-    num_to_be_deleted = abs(y_train.count(0) - y_train.count(1))
-
-    deleted_count = 0
-    
-    seed_up = 1 #used to randomly generate other numbers
-    while True:
-        np.random.seed(seed_val+seed_up)
-        to_be_deleted_index_val = np.random.randint(0, len(x_train))
-
-        seed_up += 1
-        #Check if it is the majority count
-        if y_train[to_be_deleted_index_val] == abs(over_val-1): #0 if long is the majority  XXXXXXXXXX
-            y_train.pop(to_be_deleted_index_val)
-            x_train.pop(to_be_deleted_index_val)     
-            deleted_count += 1 
-        else:
-            pass
-        if num_to_be_deleted == deleted_count:
-            print('Number of data removed: ' + str(deleted_count))
-            break
-    
-    x_train = np.array(x_train)
-    y_train = np.array(y_train)       
-    
-    print('Resampled dataset shape %s' % Counter(y_train))
-    
-    buy_sell = Counter(y_train)
-    buy_sell = buy_sell[0]/(buy_sell[0]+buy_sell[1])
-    
-    #==========================================================================
-
-    print('Final 0 and 1 %: (must be 0.5)')
-    print(y_train.tolist().count(0)/len(y_train)) #This must be 50%
-    
-    return x_train, y_train
-
-
-#x_train, y_train = simple_random_undersampling(x_train, y_train, 666)
-
-
-
-
-from collections import Counter
-#--------------------------------------------------------------------------------------------------
-def stratified_random_resampling(combined_labels, y_label, sampling_method, seed_val):
-    """
-    Performs simple random sampling on each of the over-represented y-labels separately
-    
-    Parameters
-    ----------
-    1. combined_labels: 
-        Combined list of all x labels only
-    Ex. combined_labels = [image_1, image_2, type_label_output]
-    x labels take numpy array (various dimensions are accepted) in case of stacked images or series in case of vectors
-    
-    2. y_labels: 
-        Takes 1D numpy array. This label must be a single list of vector containing all the labels from 0 to n. Cannot take one hot-encoding labels
-    
-    3. sampling_method:
-        Specify whether resampling method uses "oversampling" or "undersampling" 
-        
-        Undersampling method always uses sampling method *without* replacement for each of the respective label
-        Oversampling method uses sampling method *without* replacement by default unless the required oversampling units are greater than the units in the label
-        If that is the case, sampling method *with* replacement is used for that label
-        
-    4. seed_val:
-        Takes int that corresponds to random.sample() / random.choice() functions
-    
-    Returns
-    -------
-    1. returns combined_list with orders based on the input order of the combined_labels
-    ***Must takes the lists out and reconvert to numpy array***
-    
-    2. returns list_output containins all the data that was removed as well as its original index value
-    """
-    
-    #Applies random sampling
-    random.seed(seed_val)
-
-    
-    #Merges y_label into a single list to perform undersampling altogether
-    
-    combined_labels = combined_labels + [y_label]
-    
-    #Determine the number of y_labels
-    label_val = np.unique(y_label).tolist()
-
-    #Count the number of data in each label
-    label_count = list()
-    for i in range(len(label_val)):
-        label_count.append((y_label == i).sum()) #numpy way of performing .count() function in list format
-        
-    #Determine which label has the least count
-    #******************************
-    if sampling_method == 'undersampling':
-        min_max_label = label_count.index(min(label_count))
-    elif sampling_method == 'oversampling':
-        min_max_label = label_count.index(max(label_count))
-        
-    
-    #Reorganize the list without the min label count
-    label_val.remove(min_max_label)
-    #label_val[min_label] = None
-    
-    #Create lists of lists containing label's original index value and its respective labels
-    """
-    Ex. Suppose we have a y_label = [0,0,1,2,2] that contains 3 different labels
-    y_label would then be converted into [[0,0], [1,0], [2,1], [3,2], [4,2]] 
-    where the first index within the list is the original index value and the second index
-    is the y label. This is done to track random.sample() function on which label is randomly selected
-    """
-    y_label_index = list()
-    for i in range(len(y_label)):
-        y_label_index.append([i, y_label[i]])
-    
-    #Now separating each of the label into its own lists
-    list_output = list() #This specific lists output all the labels that need to be removed with its index value
-    for i in range(len(label_val)):
-        current_label_list = list()
-        current_label = label_val[i]
-        for j in range(len(y_label_index)):
-            if y_label_index[j][1] == current_label:
-                current_label_list.append(y_label_index[j])
-                
-
-        #Specifies how many of the said label needs to be removed based off the min/max label count
-        if sampling_method == 'undersampling':
-            target_label_count = label_count[current_label] - label_count[min_max_label]
-            
-            #Random sampling within a label without replacement
-            randomized_list = random.sample(current_label_list, target_label_count) 
-  
-        elif sampling_method == 'oversampling':
-            target_label_count = label_count[min_max_label] - label_count[current_label]
-            
-            #Random sampling within a label WITH replacement if with replacement option cannot be done
-            try: 
-                randomized_list = random.sample(current_label_list, target_label_count) 
-            except ValueError:
-                print('Selected sample is larger than the population, sampling WITH replacement is used for label: ' + str(current_label_list[0][1]))
-                randomized_list = random.choices(current_label_list, k=target_label_count)
-                       
-        list_output.append(randomized_list)
-
-
-    #---Take the combined_labels and remove each of them based on its index values---
-    #Combine entire lists into a single list. If it is a binary label, then processed_list = list_output
-    processed_list = list()
-    for i in range(len(label_val)):
-        processed_list.extend(list_output[i])
-    
-    #The lists must be sorted in reverse order so that when xlabels are removed, it is not affecting its index value
-    processed_list.sort(reverse = True)
-    
-    #Deleting all the available xlabels and ylabels
-    final_output = list()
-    for i in range(len(combined_labels)):
-        target_label = combined_labels[i]
-        target_label = target_label.tolist()
-        
-        if sampling_method == 'undersampling':
-            for j in tqdm(range(len(processed_list))):
-                del target_label[processed_list[j][0]]
-            final_output.append(target_label)
-            
-        elif sampling_method == 'oversampling':
-            for j in tqdm(range(len(processed_list))):
-                #Insert(index position, insert value)
-                target_label.insert(processed_list[j][0], target_label[processed_list[j][0]])
-            final_output.append(target_label)
-
-    #Ouput Summary
-    print('\n\n* Resampling complete * | Method used: ' + str(sampling_method))
-    print('Original dataset count: ' + str(Counter(y_label)))
-    
-    #final_output's last index is always the y_label
-    y_train_rs = np.array(final_output[len(final_output)-1])
-    print('Resampled dataset count: ' + str(Counter(y_train_rs)))
-    
-    return final_output, list_output
-    
